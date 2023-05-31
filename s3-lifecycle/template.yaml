@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: S3 lifecycle
+
+
+Resources:
+  S3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-lifecycle-bucket
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Enabled
+      # You are trying to read an image from an S3 bucket with your origin xyz.com. If you have just created a
+      # bucket and hosted your images in the bucket. By default, there won’t be any CORS config on your bucket.
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+              - x-amz-*
+            AllowedMethods:
+              - GET
+              - PUT
+              - POST
+            AllowedOrigins:
+              - '*'
+              - 'http://www.example.net'
+            ExposedHeaders:
+              - Connection
+              - Server
+              - Date
+            MaxAge: 3600
+      LifecycleConfiguration:
+        Rules:
+          # StorageClass: STANDARD_IA
+          # S3 Standard offers high durability, availability, and performance object storage for frequently accessed
+          # data. Because it delivers low latency and high throughput, S3 Standard is appropriate for a wide variety of
+          # use cases, including cloud applications, dynamic websites, content distribution, mobile and gaming
+          # applications, and big data analytics.
+
+
+          # S3 Intelligent-Tiering monitors access patterns and automatically moves objects that have not been accessed
+          # to lower-cost access tiers. S3 Intelligent-Tiering automatically stores objects in three access tiers:
+          # one tier that is optimized for frequent access, a 40% lower-cost tier that is optimized for infrequent
+          # access, and a 68% lower-cost tier optimized for rarely accessed data. S3 Intelligent-Tiering monitors access
+          # patterns and moves objects that have not been accessed for 30 consecutive days to the Infrequent Access tier
+          # and after 90 days of no access to the Archive Instant Access tier. For data that does not require immediate
+          # retrieval, you can set up S3 Intelligent-Tiering to monitor and automatically move objects that aren’t
+          # accessed for 180 days or more to the Deep Archive Access tier to realize up to 95% in storage cost savings.
+          - Id: InteligentTieringRule
+            Prefix: Intelligent/ # Use prefix to set different rules for different folders(logically)
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 80
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 180
+                StorageClass: INTELLIGENT_TIERING
+            ExpirationInDays: 220 # The current version of objects will be deleted after 356 days.
+
+          # S3 Standard-IA is for data that is accessed less frequently, but requires rapid access when needed. S3
+          # Standard-IA offers the high durability, high throughput, and low latency.This combination of low cost and
+          # high performance make S3 Standard-IA ideal for long-term storage, backups, and as a data store for disaster
+          # recovery files.
+          - Id: StandardIARule
+            Prefix: Standardia/
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 120
+                StorageClass: INTELLIGENT_TIERING
+              - TransitionInDays: 80
+                StorageClass: STANDARD_IA
+            ExpirationInDays: 180
+
+          # S3 One Zone-IA is for data that is accessed less frequently, but requires rapid access when needed. Unlike
+          # other S3 Storage Classes which store data in a minimum of three Availability Zones (AZs), S3 One Zone-IA
+          # stores data in a single AZ and costs 20% less than S3 Standard-IA. S3 One Zone-IA is ideal for customers
+          # who want a lower-cost option for infrequently accessed data but do not require the availability and
+          # resilience of S3 Standard or S3 Standard-IA. It’s a good choice for storing secondary backup copies of
+          # on-premises data or easily re-creatable data. You can also use it as cost-effective storage for data that
+          # is replicated from another AWS Region using S3 Cross-Region Replication.
+          - Id: OneZoneIARule
+            Prefix: onezone/
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 40
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 90
+                StorageClass: ONEZONE_IA
+            ExpirationInDays: 100
+
+          # S3 Glacier Flexible Retrieval delivers low-cost storage, up to 10% lower cost (than S3 Glacier Instant Retrieval),
+          # for archive data that is accessed 1—2 times per year and is retrieved asynchronously. For archive data that
+          # does not require immediate access but needs the flexibility to retrieve large sets of data at no cost, such
+          # as backup or disaster recovery use cases, S3 Glacier Flexible Retrieval (formerly S3 Glacier) is the ideal
+          # storage class. S3 Glacier Flexible Retrieval delivers the most flexible retrieval options that balance cost
+          # with access times ranging from minutes to hours and with free bulk retrievals. It is an ideal solution for
+          # backup, disaster recovery, offsite data storage needs, and for when some data occasionally need to be
+          # retrieved in minutes, and you don’t want to worry about costs. S3 Glacier Flexible
+          - Id: GlacierRule
+            Prefix: glacier
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+            ExpirationInDays: 365
+
+          # S3 Glacier Deep Archive is Amazon S3’s lowest-cost storage class and supports long-term retention and digital
+          # preservation for data that may be accessed once or twice in a year. It is designed for customers—particularly
+          # those in highly-regulated industries, such as financial services, healthcare, and public sectors—that retain
+          # data sets for 7—10 years or longer to meet regulatory compliance requirements. S3 Glacier Deep Archive can
+          # also be used for backup and disaster recovery use cases, and is a cost-effective and easy-to-manage
+          # alternative to magnetic tape systems, whether they are on-premises libraries or off-premises services.
+          # S3 Glacier Deep Archive complements Amazon S3 Glacier, which is ideal for archives where data is regularly
+          # retrieved and some of the data may be needed in minutes.
+          - Id: DeepArchiveRule
+            Prefix: DeepArchive
+            Status: Enabled
+            Transition:
+              StorageClass: GLACIER
+              TransitionInDays: 30 # Objects will move to Glacier after 30 days
+            NoncurrentVersionTransition:
+              StorageClass: DEEP_ARCHIVE
+              TransitionInDays: 60 # Non-current version transition data
+            NoncurrentVersionExpirationInDays: 90 # Non-current version expiration data
+            ExpirationInDays: 180
+Outputs:
+  BucketName:
+    Value: !Ref S3Bucket
+    Description: Name of the sample Amazon S3 bucket with a lifecycle configuration.

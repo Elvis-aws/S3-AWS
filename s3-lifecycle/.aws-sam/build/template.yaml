@@ -1,0 +1,83 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: S3 lifecycle
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-lifecycle-bucket
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Enabled
+      CorsConfiguration:
+        CorsRules:
+        - AllowedHeaders:
+          - '*'
+          - x-amz-*
+          AllowedMethods:
+          - GET
+          - PUT
+          - POST
+          AllowedOrigins:
+          - '*'
+          - http://www.example.net
+          ExposedHeaders:
+          - Connection
+          - Server
+          - Date
+          MaxAge: 3600
+      LifecycleConfiguration:
+        Rules:
+        - Id: InteligentTieringRule
+          Prefix: Intelligent/
+          Status: Enabled
+          Transitions:
+          - TransitionInDays: 80
+            StorageClass: STANDARD_IA
+          - TransitionInDays: 180
+            StorageClass: INTELLIGENT_TIERING
+          ExpirationInDays: 220
+        - Id: StandardIARule
+          Prefix: Standardia/
+          Status: Enabled
+          Transitions:
+          - TransitionInDays: 120
+            StorageClass: INTELLIGENT_TIERING
+          - TransitionInDays: 80
+            StorageClass: STANDARD_IA
+          ExpirationInDays: 180
+        - Id: OneZoneIARule
+          Prefix: onezone/
+          Status: Enabled
+          Transitions:
+          - TransitionInDays: 40
+            StorageClass: STANDARD_IA
+          - TransitionInDays: 90
+            StorageClass: ONEZONE_IA
+          ExpirationInDays: 100
+        - Id: GlacierRule
+          Prefix: glacier
+          Status: Enabled
+          Transitions:
+          - TransitionInDays: 30
+            StorageClass: STANDARD_IA
+          - TransitionInDays: 90
+            StorageClass: GLACIER
+          ExpirationInDays: 365
+        - Id: DeepArchiveRule
+          Prefix: DeepArchive
+          Status: Enabled
+          Transition:
+            StorageClass: GLACIER
+            TransitionInDays: 30
+          NoncurrentVersionTransition:
+            StorageClass: DEEP_ARCHIVE
+            TransitionInDays: 60
+          NoncurrentVersionExpirationInDays: 90
+          ExpirationInDays: 180
+Outputs:
+  BucketName:
+    Value:
+      Ref: S3Bucket
+    Description: Name of the sample Amazon S3 bucket with a lifecycle configuration.
