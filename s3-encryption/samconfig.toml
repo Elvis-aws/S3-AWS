@@ -1,0 +1,13 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "encryption-app"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-nwx9ueizf9r0"
+s3_prefix = "encryption-app"
+region = "eu-west-2"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+disable_rollback = true
+parameter_overrides = "TestObjectKey=\"test.txt\""
+image_repositories = []

@@ -1,0 +1,130 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: S3 Replication
+
+
+Resources:
+
+  ReplicationS3BucketOne:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-replication-one-bucket
+      VersioningConfiguration:
+        Status: Enabled
+
+  ReplicationS3BucketTwo:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-replication-two-bucket
+      VersioningConfiguration:
+        Status: Enabled
+
+  MainS3Bucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-main-bucket
+      VersioningConfiguration:
+        Status: Enabled
+      ReplicationConfiguration:
+        Role: !GetAtt MainS3BucketReplicationRole.Arn
+        Rules:
+          - Id: RuleOne
+            Status: Enabled
+            DeleteMarkerReplication:
+              Status: Enabled
+            Priority: 1
+            Filter:
+              Prefix: ''
+            Destination:
+              Bucket: !GetAtt ReplicationS3BucketOne.Arn
+              StorageClass: STANDARD
+
+          - Id: RuleTwo
+            Status: Enabled
+            DeleteMarkerReplication:
+              Status: Enabled
+            Priority: 2
+            Filter:
+              Prefix: ''
+            Destination:
+              Bucket: !GetAtt ReplicationS3BucketTwo.Arn
+              StorageClass: STANDARD
+
+  MainS3BucketReplicationRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - s3.amazonaws.com
+  ReplicationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - s3.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ReplicationRolePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObjectVersion
+                  - s3:GetObjectVersionAcl
+                  - s3:GetObjectVersionTagging
+                  - s3:PutReplicationConfiguration
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketLocation
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${ReplicationS3BucketOne}"
+
+  ReplicationRolePolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Action:
+              - 's3:GetReplicationConfiguration'
+              - 's3:ListBucket'
+            Effect: Allow
+            Resource:
+              - !Join ['',['arn:aws:s3:::', !Ref MainS3Bucket]]
+          - Action:
+              - 's3:ListBucket'
+              - 's3:GetReplicationConfiguration'
+              - 's3:GetObjectVersionForReplication'
+              - 's3:GetObjectVersionAcl'
+            Effect: Allow
+            Resource:
+              - !Join ['',['arn:aws:s3:::', !Ref MainS3Bucket, '/*']]
+          - Action:
+              - 's3:ReplicateObject'
+              - 's3:ReplicateDelete'
+              - 's3:ReplicateTags'
+              - 's3:GetObjectVersionTagging'
+              - 's3:GetBucketVersioning'
+              - 's3:PutBucketVersioning'
+              - 's3:ObjectOwnerOverrideToBucketOwner'
+            Effect: Allow
+            Resource:
+              - !Join ['',['arn:aws:s3:::', !Ref ReplicationS3BucketOne, '/*']]
+              - !Join ['',['arn:aws:s3:::', !Ref ReplicationS3BucketTwo, '/*']]
+      PolicyName: BucketBackupPolicy
+      Roles:
+        - !Ref MainS3BucketReplicationRole

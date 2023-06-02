@@ -1,0 +1,249 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: S3 Replication
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 128
+    Runtime: python3.9
+    Tracing: Active
+
+  Api:
+    TracingEnabled: True
+
+Parameters:
+  TestObjectKey:
+    Type: String
+    Default: test.txt
+
+Resources:
+# You can use symmetric encryption KMS keys to encrypt and decrypt small amounts of data
+# You can also use a symmetric encryption KMS key to encrypt data stored in AWS services that are integrated with AWS KMS
+# You can use asymmetric KMS keys to encrypt and decrypt data or sign messages and verify signatures
+# You can use HMAC KMS keys (which are also symmetric keys) to generate and verify hash-based message authentication codes
+##############################################
+############### S3 AES256Bucket ##############
+##############################################
+  S3KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Enabled: true
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: key-default-1
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "*"
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+            Condition:
+              StringEquals:
+                kms:CallerAccount: !Ref AWS::AccountId
+                kms:ViaService: !Sub "s3.${AWS::Region}.amazonaws.com"
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "*"
+            Resource: "*"
+      KeySpec: SYMMETRIC_DEFAULT
+      KeyUsage: ENCRYPT_DECRYPT
+      MultiRegion: false
+
+#  S3KMSAlias:
+#    Type: 'AWS::KMS::Alias'
+#    Properties:
+#      AliasName: alias/aws/s3
+#      TargetKeyId: !Ref S3KMSKey
+# Server-side encryption with Amazon S3 managed keys (SSE-S3)
+# Server-side encryption with AWS Key Management Service (AWS KMS) keys (SSE-KMS)
+# Server-side encryption with customer-provided keys (SSE-C)
+##############################################
+############### S3 AES256Bucket ##############
+##############################################
+# SSE-S3 is now enabled by default
+  SSEAES256Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      AccessControl: Private
+      BucketName: !Sub ${AWS::StackName}-sse-ae256-bucket
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: false
+            ServerSideEncryptionByDefault:  # SSE-S3 is enabled with the ServerSideEncryptionByDefault property.
+              SSEAlgorithm: AES256          # It is enabled by specifying “AES256” for the SSEAlgorithm property
+##############################################
+############### S3 SSEKMSBucket ##############
+##############################################
+# SSE-KMS will create the following two patterns
+# Use an AWS Managed Key.
+# Use a Customer Managed Key (CMK)
+  SSEKMSBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      AccessControl: Private
+      BucketName: !Sub ${AWS::StackName}-sse-kms-bucket
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: false
+            ServerSideEncryptionByDefault:
+#              KMSMasterKeyID: !Join ['',['arn:aws:kms:${AWS::Region}:${AWS::AccountId:}', !Ref S3KMSAlias]]
+              KMSMasterKeyID: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/s3"
+              SSEAlgorithm: aws:kms
+##############################################
+############## S3 SSEKMSCMKBucket3 ###########
+##############################################
+  SSEKMSCMKBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      AccessControl: Private
+      BucketName: !Sub ${AWS::StackName}-sse-kms-cmk-bucket
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: false
+            ServerSideEncryptionByDefault:
+              KMSMasterKeyID: !Ref S3KMSKey
+              SSEAlgorithm: aws:kms
+##############################################
+############### S3 SSECBucket3 ###############
+##############################################
+  SSECBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      BucketName: !Sub ${AWS::StackName}-sse-c-bucket
+##############################################
+############### S3 SSECBucket3 ###############
+##############################################
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SSECBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - s3:PutObject
+            Effect: Deny
+            Principal: "*"
+            Resource:
+              - !Sub "arn:aws:s3:::${SSECBucket}/*"
+            Condition:
+              "Null":
+                s3:x-amz-server-side-encryption-customer-algorithm: true
+# bucket policy denies upload object (s3:PutObject) permissions for all requests that don’t include the x-amz-server-side-encryption-customer-algorithm
+# header requesting SSE-C
+##############################################
+############### Secret Manager ###############
+##############################################
+  Secret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Secret for S3 SSE-C.
+      GenerateSecretString:
+        ExcludeCharacters: ""
+        ExcludeLowercase: false
+        ExcludeNumbers: false
+        ExcludePunctuation: true
+        ExcludeUppercase: true
+        IncludeSpace: false
+        PasswordLength: 32
+        RequireEachIncludedType: true
+      KmsKeyId: alias/aws/secretsmanager
+      Name: fa-125
+# We generated a random password under the following conditions, since it is a key for AES256.
+# Password length is 32 characters
+# Contains lowercase alphabets and numbers
+##############################################
+############## Lambda Functions ##############
+##############################################
+  SSECBucket3Function1:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: SSECBucket3Function1
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref SSECBucket
+          OBJECT_KEY: !Ref TestObjectKey
+          SECRET_ARN: !Ref Secret
+      CodeUri: src/
+      Handler: app.lambda_handler1
+      Role: !GetAtt FunctionRole.Arn
+      Events:
+        APIEvent:
+          Type: Api
+          Properties:
+            Path: /lambda
+            Method: put
+
+  SSECBucket3Function2:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: SSECBucket3Function2
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref SSECBucket
+          OBJECT_KEY: !Ref TestObjectKey
+          SECRET_ARN: !Ref Secret
+      CodeUri: src/
+      Handler: app.lambda_handler2
+      Role: !GetAtt FunctionRole.Arn
+      Events:
+        APIEvent:
+          Type: Api
+          Properties:
+            Path: /lambda
+            Method: get
+##############################################
+############### Function Role ################
+##############################################
+  FunctionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: FunctionPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref Secret
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${SSECBucket}"
+                  - !Sub "arn:aws:s3:::${SSECBucket}/*"
+
+# https://awstut.com/en/2023/04/16/all-patterns-of-server-side-encryption-of-s3-buckets-sse-s3-sse-kms-sse-c-en/
+############################################
+################## OUT PUT #################
+############################################
+Outputs:
+  s3Api:
+    Description: "API Gateway endpoint URL for Prod stage for SSECBucket3Function"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/lambda/"
+############################################

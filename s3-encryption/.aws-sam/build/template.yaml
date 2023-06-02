@@ -1,0 +1,215 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: S3 Replication
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 128
+    Runtime: python3.9
+    Tracing: Active
+  Api:
+    TracingEnabled: true
+Parameters:
+  TestObjectKey:
+    Type: String
+    Default: test.txt
+Resources:
+  S3KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Enabled: true
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: key-default-1
+        Statement:
+        - Effect: Allow
+          Principal:
+            AWS: '*'
+          Action:
+          - kms:Encrypt
+          - kms:Decrypt
+          - kms:ReEncrypt*
+          - kms:GenerateDataKey*
+          - kms:DescribeKey
+          Resource: '*'
+          Condition:
+            StringEquals:
+              kms:CallerAccount:
+                Ref: AWS::AccountId
+              kms:ViaService:
+                Fn::Sub: s3.${AWS::Region}.amazonaws.com
+        - Effect: Allow
+          Principal:
+            AWS:
+              Fn::Sub: arn:aws:iam::${AWS::AccountId}:root
+          Action: '*'
+          Resource: '*'
+      KeySpec: SYMMETRIC_DEFAULT
+      KeyUsage: ENCRYPT_DECRYPT
+      MultiRegion: false
+  SSEAES256Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      AccessControl: Private
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-sse-ae256-bucket
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - BucketKeyEnabled: false
+          ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+  SSEKMSBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      AccessControl: Private
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-sse-kms-bucket
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - BucketKeyEnabled: false
+          ServerSideEncryptionByDefault:
+            KMSMasterKeyID:
+              Fn::Sub: arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/s3
+            SSEAlgorithm: aws:kms
+  SSEKMSCMKBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      AccessControl: Private
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-sse-kms-cmk-bucket
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - BucketKeyEnabled: false
+          ServerSideEncryptionByDefault:
+            KMSMasterKeyID:
+              Ref: S3KMSKey
+            SSEAlgorithm: aws:kms
+  SSECBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-sse-c-bucket
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: SSECBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Action:
+          - s3:PutObject
+          Effect: Deny
+          Principal: '*'
+          Resource:
+          - Fn::Sub: arn:aws:s3:::${SSECBucket}/*
+          Condition:
+            'Null':
+              s3:x-amz-server-side-encryption-customer-algorithm: true
+  Secret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Secret for S3 SSE-C.
+      GenerateSecretString:
+        ExcludeCharacters: ''
+        ExcludeLowercase: false
+        ExcludeNumbers: false
+        ExcludePunctuation: true
+        ExcludeUppercase: true
+        IncludeSpace: false
+        PasswordLength: 32
+        RequireEachIncludedType: true
+      KmsKeyId: alias/aws/secretsmanager
+      Name: fa-125
+  SSECBucket3Function1:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: SSECBucket3Function1
+      Environment:
+        Variables:
+          BUCKET_NAME:
+            Ref: SSECBucket
+          OBJECT_KEY:
+            Ref: TestObjectKey
+          SECRET_ARN:
+            Ref: Secret
+      CodeUri: SSECBucket3Function1
+      Handler: app.lambda_handler1
+      Role:
+        Fn::GetAtt:
+        - FunctionRole
+        - Arn
+      Events:
+        APIEvent:
+          Type: Api
+          Properties:
+            Path: /lambda
+            Method: put
+    Metadata:
+      SamResourceId: SSECBucket3Function1
+  SSECBucket3Function2:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: SSECBucket3Function2
+      Environment:
+        Variables:
+          BUCKET_NAME:
+            Ref: SSECBucket
+          OBJECT_KEY:
+            Ref: TestObjectKey
+          SECRET_ARN:
+            Ref: Secret
+      CodeUri: SSECBucket3Function2
+      Handler: app.lambda_handler2
+      Role:
+        Fn::GetAtt:
+        - FunctionRole
+        - Arn
+      Events:
+        APIEvent:
+          Type: Api
+          Properties:
+            Path: /lambda
+            Method: get
+    Metadata:
+      SamResourceId: SSECBucket3Function2
+  FunctionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyName: FunctionPolicy
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - secretsmanager:GetSecretValue
+            Resource:
+            - Ref: Secret
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:PutObject
+            Resource:
+            - Fn::Sub: arn:aws:s3:::${SSECBucket}
+            - Fn::Sub: arn:aws:s3:::${SSECBucket}/*
+Outputs:
+  s3Api:
+    Description: API Gateway endpoint URL for Prod stage for SSECBucket3Function
+    Value:
+      Fn::Sub: https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/lambda/
