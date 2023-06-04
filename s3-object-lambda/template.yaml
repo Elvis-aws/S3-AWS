@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: S3 Replication
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 128
+    Runtime: python3.9
+    Tracing: Active
+
+  Api:
+    TracingEnabled: True
+
+Parameters:
+
+
+Resources:
+# Clients use GetObject as normal but replace the bucket name with an S3 Object Lambda Access Point ARN.
+# The object being requested does not have to exist in the underlying bucket. Every GET request is intercepted by a
+# Lambda invocation and the response can transform a real object or generate new data.
+
+
+##############################################
+################## S3 Bucket #################
+##############################################
+  ObjectLambdaBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-object-lambda-bucket
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+##############################################
+############## S3 Bucket Policy ##############
+##############################################
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ObjectLambdaBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: '*'
+            Principal:
+              AWS: '*'
+            Resource:
+              - !Sub "arn:aws:s3:::${ObjectLambdaBucket}/*"
+            Condition:
+              StringEquals:
+                's3:DataAccessPointAccount': !Sub ${AWS::AccountId}
+##############################################
+############# Bucket Access Point ############
+##############################################
+  S3AccessPoint:
+    Type: AWS::S3::AccessPoint
+    Properties:
+      Bucket: !Ref ObjectLambdaBucket
+      Name: !Sub ${AWS::StackName}-bucket-access-point
+##############################################
+############# Lambda Access Point ############
+##############################################
+  lambdaAccessPoint:
+    Type: AWS::S3ObjectLambda::AccessPoint
+    Properties:
+      Name: !Sub ${AWS::StackName}-lambda-access-point
+      ObjectLambdaConfiguration:
+        CloudWatchMetricsEnabled: true
+        SupportingAccessPoint: !Sub arn:aws:s3:${AWS::Region}:${AWS::AccountId}:accesspoint/${S3AccessPoint}
+
+        TransformationConfigurations:
+          - Actions: [ 'GetObject' ]
+            ContentTransformation:
+              AwsLambda:
+                FunctionArn: !GetAtt ObjectLambdaFunction.Arn
+##############################################
+############## Lambda Functions ##############
+##############################################
+  ObjectLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ObjectLambdaFunction
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref ObjectLambdaBucket
+      CodeUri: src/
+      Handler: app.object_lambda
+      # The function needs permission to call back to the S3 Object Lambda Access Point with the WriteGetObjectResponse.
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref ObjectLambdaBucket
+        - Statement:
+            - Effect: Allow
+              Action: 's3-object-lambda:WriteGetObjectResponse'
+              Resource: '*'
+############################################
+################## OUT PUT #################
+############################################
+Outputs:
+  S3BucketName:
+    Value: !Ref ObjectLambdaBucket
+    Description: S3 Bucket for object storage.
+  S3AccessPointArn:
+    Value: !Ref S3AccessPoint
+    Description: Name of the S3 access point.
+  S3ObjectLambdaAccessPointArn:
+    Value: !GetAtt lambdaAccessPoint.Arn
+    Description: ARN of the S3 Object Lambda access point.
+  ResizeFunctionArn:
+    Value: !Ref ObjectLambdaFunction
+    Description: ResizeFunction ARN.
+############################################

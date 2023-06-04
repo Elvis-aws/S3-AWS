@@ -1,4 +1,6 @@
 import base64
+import json
+
 import boto3
 import hashlib
 import os
@@ -9,33 +11,42 @@ secret_arn = os.environ['SECRET_ARN']
 
 secretmanager_client = boto3.client('secretsmanager')
 s3_client = boto3.client('s3')
-
-object_body = 'awstut!'
 char_code = 'utf-8'
 content_type = 'text/plain'
 
 
-def lambda_handler1(event, context):
-    response = secretmanager_client.get_secret_value(
-        SecretId=secret_arn
-    )
-    key = response['SecretString']
-    key_base64 = base64.b64encode(key.encode()).decode()
+def lambda_put(event, context):
+    try:
+        payload = json.loads(event['body'])
+        object_body = payload['message']
+        response = secretmanager_client.get_secret_value(
+            SecretId=secret_arn
+        )
+        key = response['SecretString']
+        key_base64 = base64.b64encode(key.encode()).decode()
 
-    key_hash = hashlib.md5(key.encode()).digest()
-    key_hash_base64 = base64.b64encode(key_hash).decode()
+        key_hash = hashlib.md5(key.encode()).digest()
+        key_hash_base64 = base64.b64encode(key_hash).decode()
 
-    response = s3_client.put_object(
-        Bucket=bucket_name,
-        Key=object_key,
-        Body=object_body.encode(char_code),
-        ContentEncoding=char_code,
-        ContentType=content_type,
-        SSECustomerAlgorithm='AES256',
-        SSECustomerKey=key_base64,
-        SSECustomerKeyMD5=key_hash_base64
-    )
-    return response
+        response = s3_client.put_object(
+            Bucket=bucket_name,
+            Key=object_key,
+            Body=object_body.encode(char_code),
+            ContentEncoding=char_code,
+            ContentType=content_type,
+            SSECustomerAlgorithm='AES256',
+            SSECustomerKey=key_base64,
+            SSECustomerKeyMD5=key_hash_base64
+        )
+        return {
+            "body": json.dumps({
+                "message": f"{response}"
+            }), }
+    except Exception as exc:
+        return {
+            "body": json.dumps({
+                "Exception": f"{exc}"
+            }), }
 
 
 # After creating a client object for Secrets Manager, access the secret and obtain the key for encryption.
@@ -50,25 +61,36 @@ def lambda_handler1(event, context):
 # x-amz-server-side-encryption-customer-key-MD5
 
 
-def lambda_handler2(event, context):
-    response = secretmanager_client.get_secret_value(
-        SecretId=secret_arn
-    )
-    key = response['SecretString']
-    key_base64 = base64.b64encode(key.encode()).decode()
+def lambda_get(event, context):
+    try:
+        response = secretmanager_client.get_secret_value(
+            SecretId=secret_arn
+        )
+        key = response['SecretString']
+        key_base64 = base64.b64encode(key.encode()).decode()
 
-    key_hash = hashlib.md5(key.encode()).digest()
-    key_hash_base64 = base64.b64encode(key_hash).decode()
+        key_hash = hashlib.md5(key.encode()).digest()
+        key_hash_base64 = base64.b64encode(key_hash).decode()
 
-    response = s3_client.get_object(
-        Bucket=bucket_name,
-        Key=object_key,
-        SSECustomerAlgorithm='AES256',
-        SSECustomerKey=key_base64,
-        SSECustomerKeyMD5=key_hash_base64
-    )
-    body = response['Body'].read()
-    return body.decode(char_code)
+        response = s3_client.get_object(
+            Bucket=bucket_name,
+            Key=object_key,
+            SSECustomerAlgorithm='AES256',
+            SSECustomerKey=key_base64,
+            SSECustomerKeyMD5=key_hash_base64
+        )
+        body = response['Body'].read()
+        decode = body.decode(char_code)
+        return {
+            "body": json.dumps({
+                "decode": f"{decode}"
+            }), }
+    except Exception as exc:
+        return {
+            "body": json.dumps({
+                "Exception": f"{exc}"
+            }), }
+
 
 # Execute the get_object method of the client object for S3 to download the uploaded object.
 # Three parameters for SSE-C are specified here as well.

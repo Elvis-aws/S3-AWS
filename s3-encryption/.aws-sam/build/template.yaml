@@ -138,7 +138,7 @@ Resources:
           SECRET_ARN:
             Ref: Secret
       CodeUri: SSECBucket3Function1
-      Handler: app.lambda_handler1
+      Handler: app.lambda_put
       Role:
         Fn::GetAtt:
         - FunctionRole
@@ -147,8 +147,10 @@ Resources:
         APIEvent:
           Type: Api
           Properties:
+            RestApiId:
+              Ref: BasicAWSApiGateway
             Path: /lambda
-            Method: put
+            Method: PUT
     Metadata:
       SamResourceId: SSECBucket3Function1
   SSECBucket3Function2:
@@ -164,7 +166,7 @@ Resources:
           SECRET_ARN:
             Ref: Secret
       CodeUri: SSECBucket3Function2
-      Handler: app.lambda_handler2
+      Handler: app.lambda_get
       Role:
         Fn::GetAtt:
         - FunctionRole
@@ -173,8 +175,10 @@ Resources:
         APIEvent:
           Type: Api
           Properties:
+            RestApiId:
+              Ref: BasicAWSApiGateway
             Path: /lambda
-            Method: get
+            Method: GET
     Metadata:
       SamResourceId: SSECBucket3Function2
   FunctionRole:
@@ -208,8 +212,48 @@ Resources:
             Resource:
             - Fn::Sub: arn:aws:s3:::${SSECBucket}
             - Fn::Sub: arn:aws:s3:::${SSECBucket}/*
+  BasicAWSApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: Basic AWS Api Gateway
+      StageName: Staging
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: BasicAWSApiGateway
+    Properties:
+      Description: Lambda API Deployment
+      RestApiId:
+        Ref: BasicAWSApiGateway
+  ApiGatewayIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Sid: ''
+          Effect: Allow
+          Principal:
+            Service:
+            - apigateway.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: LambdaAccess
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action: lambda:*
+            Resource:
+            - Fn::GetAtt:
+              - SSECBucket3Function1
+              - Arn
+            - Fn::GetAtt:
+              - SSECBucket3Function2
+              - Arn
 Outputs:
   s3Api:
     Description: API Gateway endpoint URL for Prod stage for SSECBucket3Function
     Value:
-      Fn::Sub: https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/lambda/
+      Fn::Sub: https://${BasicAWSApiGateway}.execute-api.${AWS::Region}.amazonaws.com/Staging/lambda/

@@ -56,14 +56,6 @@ Resources:
       KeyUsage: ENCRYPT_DECRYPT
       MultiRegion: false
 
-#  S3KMSAlias:
-#    Type: 'AWS::KMS::Alias'
-#    Properties:
-#      AliasName: alias/aws/s3
-#      TargetKeyId: !Ref S3KMSKey
-# Server-side encryption with Amazon S3 managed keys (SSE-S3)
-# Server-side encryption with AWS Key Management Service (AWS KMS) keys (SSE-KMS)
-# Server-side encryption with customer-provided keys (SSE-C)
 ##############################################
 ############### S3 AES256Bucket ##############
 ##############################################
@@ -176,14 +168,15 @@ Resources:
           OBJECT_KEY: !Ref TestObjectKey
           SECRET_ARN: !Ref Secret
       CodeUri: src/
-      Handler: app.lambda_handler1
+      Handler: app.lambda_put
       Role: !GetAtt FunctionRole.Arn
       Events:
         APIEvent:
           Type: Api
           Properties:
+            RestApiId: !Ref BasicAWSApiGateway
             Path: /lambda
-            Method: put
+            Method: PUT
 
   SSECBucket3Function2:
     Type: AWS::Serverless::Function
@@ -195,14 +188,15 @@ Resources:
           OBJECT_KEY: !Ref TestObjectKey
           SECRET_ARN: !Ref Secret
       CodeUri: src/
-      Handler: app.lambda_handler2
+      Handler: app.lambda_get
       Role: !GetAtt FunctionRole.Arn
       Events:
         APIEvent:
           Type: Api
           Properties:
+            RestApiId: !Ref BasicAWSApiGateway
             Path: /lambda
-            Method: get
+            Method: GET
 ##############################################
 ############### Function Role ################
 ##############################################
@@ -238,12 +232,49 @@ Resources:
                   - !Sub "arn:aws:s3:::${SSECBucket}"
                   - !Sub "arn:aws:s3:::${SSECBucket}/*"
 
+  BasicAWSApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: Basic AWS Api Gateway
+      StageName: Staging
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: BasicAWSApiGateway
+    Properties:
+      Description: Lambda API Deployment
+      RestApiId: !Ref BasicAWSApiGateway
+
+  ApiGatewayIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: '/'
+      Policies:
+        - PolicyName: LambdaAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:*
+                Resource:
+                  - !GetAtt SSECBucket3Function1.Arn
+                  - !GetAtt SSECBucket3Function2.Arn
 # https://awstut.com/en/2023/04/16/all-patterns-of-server-side-encryption-of-s3-buckets-sse-s3-sse-kms-sse-c-en/
 ############################################
 ################## OUT PUT #################
 ############################################
 Outputs:
   s3Api:
-    Description: "API Gateway endpoint URL for Prod stage for SSECBucket3Function"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/lambda/"
+    Description: "API Gateway endpoint URL for stage for SSECBucket3Function"
+    Value: !Sub 'https://${BasicAWSApiGateway}.execute-api.${AWS::Region}.amazonaws.com/Staging/lambda/'
 ############################################
