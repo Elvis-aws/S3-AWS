@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: S3 Replication
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 128
+    Runtime: python3.9
+    Tracing: Active
+  Api:
+    TracingEnabled: true
+Resources:
+  InventoryBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-inventory-bucket
+  ConfigurationBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-configuration-bucket
+      AnalyticsConfigurations:
+      - Id: AnalyticsConfigurationId
+        StorageClassAnalysis:
+          DataExport:
+            Destination:
+              BucketArn:
+                Fn::GetAtt:
+                - InventoryBucket
+                - Arn
+              Format: CSV
+              Prefix: AnalyticsDestinationPrefix
+            OutputSchemaVersion: V_1
+        Prefix: AnalyticsConfigurationPrefix
+        TagFilters:
+        - Key: AnalyticsTagKey
+          Value: AnalyticsTagValue
+      InventoryConfigurations:
+      - Id: InventoryConfigurationId
+        Destination:
+          BucketArn:
+            Fn::GetAtt:
+            - InventoryBucket
+            - Arn
+          Format: CSV
+          Prefix: InventoryDestinationPrefix
+        Enabled: true
+        IncludedObjectVersions: Current
+        Prefix: InventoryConfigurationPrefix
+        ScheduleFrequency: Daily
+        OptionalFields:
+        - Size
+        - LastModifiedDate
+        - StorageClass
+        - ETag
+        - IsMultipartUploaded
+        - ReplicationStatus
+        - ObjectLockRetainUntilDate
+        - ObjectLockMode
+        - ObjectLockLegalHoldStatus
+        - IntelligentTieringAccessTier
+  InventoryBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: InventoryBucket
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: s3.amazonaws.com
+          Action:
+          - s3:PutObject
+          Resource:
+          - Fn::Join:
+            - ''
+            - - 'arn:aws:s3:::'
+              - Ref: InventoryBucket
+              - /*
+          Condition:
+            ArnLike:
+              aws:SourceArn:
+              - Fn::Join:
+                - ''
+                - - 'arn:aws:s3:::'
+                  - Ref: InventoryBucket
+                  - /*
+            StringEquals:
+              aws:SourceAccount:
+              - Fn::Sub: ${AWS::AccountId}
+              s3:x-amz-acl: bucket-owner-full-control
+Outputs:
+  InventoryBucketName:
+    Value:
+      Ref: InventoryBucket
+  ConfigurationBucketName:
+    Value:
+      Ref: ConfigurationBucket
