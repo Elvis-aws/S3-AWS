@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: S3 Replication
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 128
+    Runtime: python3.9
+    Tracing: Active
+  Api:
+    TracingEnabled: true
+Resources:
+  ObjectLambdaBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-object-lambda-bucket
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: ObjectLambdaBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Action: '*'
+          Principal:
+            AWS: '*'
+          Resource:
+          - Fn::Sub: arn:aws:s3:::${ObjectLambdaBucket}/*
+          Condition:
+            StringEquals:
+              s3:DataAccessPointAccount:
+                Fn::Sub: ${AWS::AccountId}
+  S3AccessPoint:
+    Type: AWS::S3::AccessPoint
+    Properties:
+      Bucket:
+        Ref: ObjectLambdaBucket
+      Name:
+        Fn::Sub: ${AWS::StackName}-bucket-access-point
+  lambdaAccessPoint:
+    Type: AWS::S3ObjectLambda::AccessPoint
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-lambda-access-point
+      ObjectLambdaConfiguration:
+        CloudWatchMetricsEnabled: true
+        SupportingAccessPoint:
+          Fn::Sub: arn:aws:s3:${AWS::Region}:${AWS::AccountId}:accesspoint/${S3AccessPoint}
+        TransformationConfigurations:
+        - Actions:
+          - GetObject
+          ContentTransformation:
+            AwsLambda:
+              FunctionArn:
+                Fn::GetAtt:
+                - ObjectLambdaFunction
+                - Arn
+  ObjectLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ObjectLambdaFunction
+      Environment:
+        Variables:
+          BUCKET_NAME:
+            Ref: ObjectLambdaBucket
+      CodeUri: ObjectLambdaFunction
+      Handler: app.object_lambda
+      Policies:
+      - S3CrudPolicy:
+          BucketName:
+            Ref: ObjectLambdaBucket
+      - Statement:
+        - Effect: Allow
+          Action: s3-object-lambda:WriteGetObjectResponse
+          Resource: '*'
+      - Statement:
+        - Effect: Allow
+          Action:
+          - logs:CreateLogGroup
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          Resource: '*'
+    Metadata:
+      SamResourceId: ObjectLambdaFunction
+  LambdaLogGroupProd:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${ObjectLambdaFunction}
+      RetentionInDays: 1
+Outputs:
+  S3BucketName:
+    Value:
+      Ref: ObjectLambdaBucket
+    Description: S3 Bucket for object storage.
+  S3AccessPointArn:
+    Value:
+      Ref: S3AccessPoint
+    Description: Name of the S3 access point.
+  S3ObjectLambdaAccessPointArn:
+    Value:
+      Fn::GetAtt:
+      - lambdaAccessPoint
+      - Arn
+    Description: ARN of the S3 Object Lambda access point.
+  ResizeFunctionArn:
+    Value:
+      Ref: ObjectLambdaFunction
+    Description: ResizeFunction ARN.

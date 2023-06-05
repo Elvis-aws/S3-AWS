@@ -12,8 +12,6 @@ Globals:
   Api:
     TracingEnabled: True
 
-Parameters:
-
 
 Resources:
 # Clients use GetObject as normal but replace the bucket name with an S3 Object Lambda Access Point ARN.
@@ -29,8 +27,6 @@ Resources:
     DeletionPolicy: Delete
     Properties:
       BucketName: !Sub ${AWS::StackName}-object-lambda-bucket
-      VersioningConfiguration:
-        Status: Enabled
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -104,6 +100,22 @@ Resources:
             - Effect: Allow
               Action: 's3-object-lambda:WriteGetObjectResponse'
               Resource: '*'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: '*'
+############################################
+############# LAMBDA LOG GROUP #############
+############################################
+
+  LambdaLogGroupProd:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ObjectLambdaFunction}
+      RetentionInDays: 1
 ############################################
 ################## OUT PUT #################
 ############################################
